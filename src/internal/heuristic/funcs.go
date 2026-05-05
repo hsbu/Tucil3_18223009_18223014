@@ -51,7 +51,22 @@ var H1 Func = func(s board.State, b *board.Board) int {
 	return manhattan(s.Pos, nextTarget(s, b))
 }
 
+func unvisitedCount(s board.State, b *board.Board) int {
+	count := 0
+	for i := range b.Checkpoints {
+		if !s.HasVisited(i) {
+			count++
+		}
+	}
+	return count
+}
+
 // H2: Jumlah Manhattan dari posisi saat ini ke setiap checkpoint yang belum dikunjungi, lalu ke goal
 var H2 Func = func(s board.State, b *board.Board) int {
 	return chainManhattan(s, b)
+}
+
+// H3: H2 + jumlah checkpoint yang belum dikunjungi sebagai penalti
+var H3 Func = func(s board.State, b *board.Board) int {
+	return H2(s, b) + unvisitedCount(s, b)
 }

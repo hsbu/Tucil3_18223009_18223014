@@ -11,4 +11,5 @@ var All = []struct {
 }{
 	{"H1", H1, true},
 	{"H2", H2, true},
+	{"H3", H3, false},
 }

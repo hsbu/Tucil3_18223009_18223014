@@ -24,9 +24,34 @@ func nextTarget(s board.State, b *board.Board) board.Position {
 	return b.Goal
 }
 
+func remainingChain(s board.State, b *board.Board) []board.Position {
+	chain := []board.Position{s.Pos}
+	for i, cp := range b.Checkpoints {
+		if !s.HasVisited(i) {
+			chain = append(chain, cp)
+		}
+	}
+	chain = append(chain, b.Goal)
+	return chain
+}
+
+func chainManhattan(s board.State, b *board.Board) int {
+	chain := remainingChain(s, b)
+	sum := 0
+	for i := 1; i < len(chain); i++ {
+		sum += manhattan(chain[i-1], chain[i])
+	}
+	return sum
+}
+
 // Heuristics
 
-// Manhattan distance from current position to the next unvisited checkpoint, or to the goal if all checkpoints have been visited.
+// H1: Manhattan dari posisi saat ini ke checkpoint berikutnya atau goal
 var H1 Func = func(s board.State, b *board.Board) int {
 	return manhattan(s.Pos, nextTarget(s, b))
+}
+
+// H2: Jumlah Manhattan dari posisi saat ini ke setiap checkpoint yang belum dikunjungi, lalu ke goal
+var H2 Func = func(s board.State, b *board.Board) int {
+	return chainManhattan(s, b)
 }

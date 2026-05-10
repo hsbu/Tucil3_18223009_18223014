@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"tucil3/internal/algorithm"
 	"tucil3/internal/board"
@@ -60,6 +61,13 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func textWidth(text string) int {
 	return len([]rune(text)) * 7
 }
@@ -68,21 +76,39 @@ func centerTextX(text string) int {
 	return centerX(textWidth(text))
 }
 
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "<1 us"
+	}
+	if d < time.Microsecond {
+		return "<1 us"
+	}
+	if d < time.Millisecond {
+		return fmt.Sprintf("%.3f us", float64(d.Nanoseconds())/1000)
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%.3f ms", float64(d.Nanoseconds())/1_000_000)
+	}
+	return fmt.Sprintf("%.3f s", d.Seconds())
+}
+
 func fileSelectLayout() (uiRect, uiRect) {
 	input := uiRect{x: centerX(inputW), y: 230, w: inputW, h: inputH}
 	load := uiRect{x: centerX(btnW), y: 270, w: btnW, h: btnH}
 	return input, load
 }
 
-func algoButtonsLayout() (uiRect, uiRect, uiRect) {
+func algoButtonsLayout() (uiRect, uiRect, uiRect, uiRect) {
 	gap := 20
-	totalW := btnW*3 + gap*2
+	w := 150
+	totalW := w*4 + gap*3
 	startX := centerX(totalW)
 	y := 270
-	ucs := uiRect{x: startX, y: y, w: btnW, h: 50}
-	gbfs := uiRect{x: startX + btnW + gap, y: y, w: btnW, h: 50}
-	astar := uiRect{x: startX + (btnW+gap)*2, y: y, w: btnW, h: 50}
-	return ucs, gbfs, astar
+	ucs := uiRect{x: startX, y: y, w: w, h: 50}
+	gbfs := uiRect{x: startX + w + gap, y: y, w: w, h: 50}
+	astar := uiRect{x: startX + (w+gap)*2, y: y, w: w, h: 50}
+	idastar := uiRect{x: startX + (w+gap)*3, y: y, w: w, h: 50}
+	return ucs, gbfs, astar, idastar
 }
 
 func heuristicButtonsLayout() []uiRect {
@@ -98,8 +124,16 @@ func heuristicButtonsLayout() []uiRect {
 	return rects
 }
 
+func backButtonLayout() uiRect {
+	return uiRect{x: pad, y: screenH - 50, w: 100, h: 30}
+}
+
 func resultPlaybackLayout() uiRect {
-	return uiRect{x: centerX(btnW), y: 460, w: btnW, h: btnH}
+	return uiRect{x: centerX(btnW) + 60, y: 460, w: btnW, h: btnH}
+}
+
+func resultBackLayout() uiRect {
+	return uiRect{x: centerX(btnW) - 160, y: 460, w: btnW, h: btnH}
 }
 
 func playbackLayout() (uiRect, uiRect, uiRect, int, int) {
@@ -110,6 +144,16 @@ func playbackLayout() (uiRect, uiRect, uiRect, int, int) {
 	next := uiRect{x: pad + 90, y: buttonsY, w: 80, h: 30}
 	play := uiRect{x: pad + 180, y: buttonsY, w: 100, h: 30}
 	return prev, next, play, hudY, hintY
+}
+
+func fittedTileSize(b *board.Board) int {
+	maxW := screenW - pad*2
+	maxH := screenH - 130
+	size := minInt(tileSize, minInt(maxW/b.Cols, maxH/b.Rows))
+	if size < 8 {
+		return 8
+	}
+	return size
 }
 
 // Screen
@@ -165,7 +209,13 @@ func (s *FileSelectScreen) Draw(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, label, centerTextX(label), 210)
 	inputRect, loadRect := fileSelectLayout()
 	drawRect(screen, float64(inputRect.x), float64(inputRect.y), float64(inputRect.w), float64(inputRect.h), color.RGBA{35, 35, 60, 255})
-	ebitenutil.DebugPrintAt(screen, s.path+"_", inputRect.x+5, inputRect.y+6)
+	displayPath := s.path
+	maxChars := (inputRect.w - 14) / 7
+	if len([]rune(displayPath)) > maxChars {
+		runes := []rune(displayPath)
+		displayPath = "..." + string(runes[len(runes)-maxChars+3:])
+	}
+	ebitenutil.DebugPrintAt(screen, displayPath+"_", inputRect.x+5, inputRect.y+6)
 	drawButton(screen, "Load", loadRect.x, loadRect.y, loadRect.w, loadRect.h, loadRect.contains())
 	if s.errMsg != "" {
 		ebitenutil.DebugPrintAt(screen, s.errMsg, centerTextX(s.errMsg), 330)
@@ -185,7 +235,10 @@ func (s *AlgoSelectScreen) Update() (Screen, error) {
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return s, nil
 	}
-	ucs, gbfs, astar := algoButtonsLayout()
+	if backButtonLayout().contains() {
+		return newFileSelectScreen(), nil
+	}
+	ucs, gbfs, astar, idastar := algoButtonsLayout()
 	if ucs.contains() {
 		return newSolvingScreen(s.b, algorithm.UCS{}, nil), nil
 	}
@@ -195,18 +248,24 @@ func (s *AlgoSelectScreen) Update() (Screen, error) {
 	if astar.contains() {
 		return newHeuristicSelectScreen(s.b, algorithm.AStar{}, "A*"), nil
 	}
+	if idastar.contains() {
+		return newHeuristicSelectScreen(s.b, algorithm.IDAStar{}, "IDA*"), nil
+	}
 	return s, nil
 }
 
 func (s *AlgoSelectScreen) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{15, 15, 30, 255})
 	ebitenutil.DebugPrintAt(screen, "Choose Algorithm", 352, 180)
-	ucs, gbfs, astar := algoButtonsLayout()
+	ucs, gbfs, astar, idastar := algoButtonsLayout()
 	drawButton(screen, "UCS", ucs.x, ucs.y, ucs.w, ucs.h, ucs.contains())
 	drawButton(screen, "GBFS", gbfs.x, gbfs.y, gbfs.w, gbfs.h, gbfs.contains())
 	drawButton(screen, "A*", astar.x, astar.y, astar.w, astar.h, astar.contains())
-	ebitenutil.DebugPrintAt(screen, "GBFS and A* require a heuristic", 286, 340)
+	drawButton(screen, "IDA*", idastar.x, idastar.y, idastar.w, idastar.h, idastar.contains())
+	ebitenutil.DebugPrintAt(screen, "GBFS, A*, and IDA* require a heuristic", 260, 340)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Board: %dx%d  Checkpoints: %d", s.b.Rows, s.b.Cols, len(s.b.Checkpoints)), 286, 420)
+	back := backButtonLayout()
+	drawButton(screen, "< Back", back.x, back.y, back.w, back.h, back.contains())
 }
 
 type HeuristicSelectScreen struct {
@@ -222,6 +281,9 @@ func newHeuristicSelectScreen(b *board.Board, algo algorithm.Algorithm, algoName
 func (s *HeuristicSelectScreen) Update() (Screen, error) {
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return s, nil
+	}
+	if backButtonLayout().contains() {
+		return newAlgoSelectScreen(s.b), nil
 	}
 	for i, rect := range heuristicButtonsLayout() {
 		if rect.contains() {
@@ -245,6 +307,8 @@ func (s *HeuristicSelectScreen) Draw(screen *ebiten.Image) {
 	}
 	ebitenutil.DebugPrintAt(screen, "* admissible", centerTextX("* admissible"), 340)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Board: %dx%d  Checkpoints: %d", s.b.Rows, s.b.Cols, len(s.b.Checkpoints)), 286, 420)
+	back := backButtonLayout()
+	drawButton(screen, "< Back", back.x, back.y, back.w, back.h, back.contains())
 }
 
 type SolvingScreen struct {
@@ -285,6 +349,9 @@ func newResultScreen(b *board.Board, result algorithm.Result) *ResultScreen {
 
 func (s *ResultScreen) Update() (Screen, error) {
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		if resultBackLayout().contains() {
+			return newAlgoSelectScreen(s.b), nil
+		}
 		if s.result.Found && resultPlaybackLayout().contains() {
 			return newPlaybackScreen(s.b, s.result), nil
 		}
@@ -307,8 +374,10 @@ func (s *ResultScreen) Draw(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, "Moves : "+moves, 50, 160)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Cost : %d", s.result.TotalCost), 50, 200)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Iterations : %d", s.result.Iterations), 50, 240)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Time : %d ms", s.result.Duration.Milliseconds()), 50, 280)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Time : %s", formatDuration(s.result.Duration)), 50, 280)
+	backRect := resultBackLayout()
 	playRect := resultPlaybackLayout()
+	drawButton(screen, "< Rechoose", backRect.x, backRect.y, backRect.w, backRect.h, backRect.contains())
 	drawButton(screen, "Playback >>", playRect.x, playRect.y, playRect.w, playRect.h, playRect.contains())
 }
 
@@ -367,6 +436,9 @@ func (s *PlaybackScreen) Update() (Screen, error) {
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		prevRect, nextRect, playRect, _, _ := playbackLayout()
+		if backButtonLayout().contains() {
+			return newResultScreen(s.b, s.result), nil
+		}
 		if prevRect.contains() && s.step > 0 {
 			s.step--
 		}
@@ -385,8 +457,9 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{15, 15, 30, 255})
 
 	cur := s.allStates[s.step]
-	gridW := s.b.Cols * tileSize
-	gridH := s.b.Rows * tileSize
+	tile := fittedTileSize(s.b)
+	gridW := s.b.Cols * tile
+	gridH := s.b.Rows * tile
 	offX := maxInt(pad, centerX(gridW))
 	offY := maxInt(pad, centerY(gridH)-40)
 
@@ -400,8 +473,8 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 
 	for r := 0; r < s.b.Rows; r++ {
 		for c := 0; c < s.b.Cols; c++ {
-			x := float64(offX + c*tileSize)
-			y := float64(offY + r*tileSize)
+			x := float64(offX + c*tile)
+			y := float64(offY + r*tile)
 			t := s.b.Grid[r][c]
 
 			var col color.RGBA
@@ -415,22 +488,25 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 					col = color.RGBA{220, 190, 50, 255}
 				}
 			}
-			drawRect(screen, x+1, y+1, float64(tileSize-2), float64(tileSize-2), col)
+			drawRect(screen, x+1, y+1, float64(tile-2), float64(tile-2), col)
 
-			if board.IsCheckpoint(t) {
-				ebitenutil.DebugPrintAt(screen, string(t), int(x)+12, int(y)+10)
+			if tile >= 18 && board.IsCheckpoint(t) {
+				ebitenutil.DebugPrintAt(screen, string(t), int(x)+tile/3, int(y)+tile/3)
 			}
-			if t == board.TileGoal {
-				ebitenutil.DebugPrintAt(screen, "O", int(x)+12, int(y)+10)
+			if tile >= 18 && t == board.TileGoal {
+				ebitenutil.DebugPrintAt(screen, "O", int(x)+tile/3, int(y)+tile/3)
 			}
 		}
 	}
 
 	// Draw
-	ax := float64(offX + cur.Pos.Col*tileSize)
-	ay := float64(offY + cur.Pos.Row*tileSize)
-	drawRect(screen, ax+5, ay+5, float64(tileSize-10), float64(tileSize-10), color.RGBA{30, 80, 220, 255})
-	ebitenutil.DebugPrintAt(screen, "Z", int(ax)+12, int(ay)+10)
+	ax := float64(offX + cur.Pos.Col*tile)
+	ay := float64(offY + cur.Pos.Row*tile)
+	inset := maxInt(2, tile/7)
+	drawRect(screen, ax+float64(inset), ay+float64(inset), float64(tile-inset*2), float64(tile-inset*2), color.RGBA{30, 80, 220, 255})
+	if tile >= 18 {
+		ebitenutil.DebugPrintAt(screen, "Z", int(ax)+tile/3, int(ay)+tile/3)
+	}
 
 	// HUD
 	stepLabel := "Initial"
@@ -449,5 +525,7 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 		playLabel = "Pause"
 	}
 	drawButton(screen, playLabel, playRect.x, playRect.y, playRect.w, playRect.h, playRect.contains())
+	back := backButtonLayout()
+	drawButton(screen, "< Back", back.x, back.y, back.w, back.h, back.contains())
 	ebitenutil.DebugPrintAt(screen, "[← →] step  [Space] play  [+/-] speed", 320, hintY)
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"tucil3/internal/algorithm"
 	"tucil3/internal/board"
 	"tucil3/internal/heuristic"
@@ -33,7 +34,7 @@ func main() {
 	}
 
 	// ── Algorithm selection ──
-	fmt.Print(">> Algoritma apa yang anda pilih? (UCS/GBFS/A*) :\n")
+	fmt.Print(">> Algoritma apa yang anda pilih? (UCS/GBFS/A*/IDA*) :\n")
 	algoStr, _ := reader.ReadString('\n')
 	algoStr = strings.TrimSpace(strings.ToUpper(algoStr))
 
@@ -46,8 +47,10 @@ func main() {
 		algo = algorithm.GBFS{}
 	case "A*", "A", "ASTAR":
 		algo = algorithm.AStar{}
+	case "IDA*", "IDA", "IDASTAR":
+		algo = algorithm.IDAStar{}
 	default:
-		fmt.Fprintln(os.Stderr, "Algoritma tidak dikenal. Pilihan: UCS, GBFS, A*")
+		fmt.Fprintln(os.Stderr, "Algoritma tidak dikenal. Pilihan: UCS, GBFS, A*, IDA*")
 		os.Exit(1)
 	}
 
@@ -106,7 +109,7 @@ func main() {
 	}
 
 	// ── Execution stats ──
-	fmt.Printf("\n>> Waktu eksekusi: %d ms\n", result.Duration.Milliseconds())
+	fmt.Printf("\n>> Waktu eksekusi: %s\n", formatDuration(result.Duration))
 	fmt.Printf(">> Banyak iterasi yang dilakukan: %d iterasi\n", result.Iterations)
 
 	// ── Playback prompt ──
@@ -175,7 +178,7 @@ func main() {
 			defer outFile.Close()
 			fmt.Fprintf(outFile, "Solusi : %s\n", movesStr.String())
 			fmt.Fprintf(outFile, "Cost   : %d\n", result.TotalCost)
-			fmt.Fprintf(outFile, "Waktu  : %d ms\n", result.Duration.Milliseconds())
+			fmt.Fprintf(outFile, "Waktu  : %s\n", formatDuration(result.Duration))
 			fmt.Fprintf(outFile, "Iterasi: %d\n", result.Iterations)
 			fmt.Fprintln(outFile)
 			fmt.Fprintln(outFile, "Initial")
@@ -187,6 +190,22 @@ func main() {
 			fmt.Printf(">> Solusi disimpan pada %s\n", outPath)
 		}
 	}
+}
+
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "<1 us"
+	}
+	if d < time.Microsecond {
+		return "<1 us"
+	}
+	if d < time.Millisecond {
+		return fmt.Sprintf("%.3f us", float64(d.Nanoseconds())/1000)
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%.3f ms", float64(d.Nanoseconds())/1_000_000)
+	}
+	return fmt.Sprintf("%.3f s", d.Seconds())
 }
 
 func printBoard(b *board.Board, s board.State) {

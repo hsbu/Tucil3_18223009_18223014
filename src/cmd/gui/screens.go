@@ -77,6 +77,15 @@ func centerTextX(text string) int {
 	return centerX(textWidth(text))
 }
 
+func fitText(text string, maxPx int) string {
+	runes := []rune(text)
+	maxChars := maxPx / 7
+	if maxChars <= 3 || len(runes) <= maxChars {
+		return text
+	}
+	return string(runes[:maxChars-3]) + "..."
+}
+
 func formatMilliseconds(d time.Duration) string {
 	if d < time.Microsecond {
 		return "<0.001 ms"
@@ -120,31 +129,20 @@ func backButtonLayout() uiRect {
 	return uiRect{x: pad, y: screenH - 50, w: 100, h: 30}
 }
 
-func resultPlaybackLayout() uiRect {
-	return uiRect{x: centerX(btnW) + 180, y: 460, w: btnW, h: btnH}
-}
-
-func resultBackLayout() uiRect {
-	return uiRect{x: centerX(btnW) - 180, y: 460, w: btnW, h: btnH}
-}
-
-func resultSaveLayout() uiRect {
-	return uiRect{x: centerX(btnW), y: 460, w: btnW, h: btnH}
-}
-
-func playbackLayout() (uiRect, uiRect, uiRect, int, int) {
-	buttonsY := screenH - 50
-	hudY := screenH - 75
-	hintY := screenH - 42
-	prev := uiRect{x: pad, y: buttonsY, w: 80, h: 30}
-	next := uiRect{x: pad + 90, y: buttonsY, w: 80, h: 30}
-	play := uiRect{x: pad + 180, y: buttonsY, w: 100, h: 30}
-	return prev, next, play, hudY, hintY
+func playbackLayout() (uiRect, uiRect, uiRect, uiRect, int, int) {
+	buttonsY := 555
+	hudY := 505
+	hintY := 530
+	prev := uiRect{x: 140, y: buttonsY, w: 80, h: 30}
+	next := uiRect{x: 230, y: buttonsY, w: 80, h: 30}
+	play := uiRect{x: 320, y: buttonsY, w: 90, h: 30}
+	save := uiRect{x: 430, y: buttonsY, w: 110, h: 30}
+	return prev, next, play, save, hudY, hintY
 }
 
 func fittedTileSize(b *board.Board) int {
 	maxW := screenW - pad*2
-	maxH := screenH - 130
+	maxH := 390
 	size := minInt(tileSize, minInt(maxW/b.Cols, maxH/b.Rows))
 	if size < 8 {
 		return 8
@@ -322,6 +320,9 @@ func newSolvingScreen(b *board.Board, algo algorithm.Algorithm, h heuristic.Func
 func (s *SolvingScreen) Update() (Screen, error) {
 	select {
 	case r := <-s.done:
+		if r.Found {
+			return newPlaybackScreen(s.b, r), nil
+		}
 		return newResultScreen(s.b, r), nil
 	default:
 		return s, nil
@@ -335,9 +336,8 @@ func (s *SolvingScreen) Draw(screen *ebiten.Image) {
 }
 
 type ResultScreen struct {
-	b          *board.Board
-	result     algorithm.Result
-	saveStatus string
+	b      *board.Board
+	result algorithm.Result
 }
 
 func newResultScreen(b *board.Board, result algorithm.Result) *ResultScreen {
@@ -345,50 +345,17 @@ func newResultScreen(b *board.Board, result algorithm.Result) *ResultScreen {
 }
 
 func (s *ResultScreen) Update() (Screen, error) {
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		if resultBackLayout().contains() {
-			return newAlgoSelectScreen(s.b), nil
-		}
-		if s.result.Found && resultSaveLayout().contains() {
-			if err := saveSolutionFile("solution.txt", s.b, s.result); err != nil {
-				s.saveStatus = "Save failed: " + err.Error()
-			} else {
-				s.saveStatus = "Saved to solution.txt"
-			}
-			return s, nil
-		}
-		if s.result.Found && resultPlaybackLayout().contains() {
-			return newPlaybackScreen(s.b, s.result), nil
-		}
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && backButtonLayout().contains() {
+		return newAlgoSelectScreen(s.b), nil
 	}
 	return s, nil
 }
 
 func (s *ResultScreen) Draw(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{15, 15, 30, 255})
-	if !s.result.Found {
-		ebitenutil.DebugPrintAt(screen, "No solution found.", 310, 280)
-		return
-	}
-	var sb strings.Builder
-	for _, m := range s.result.Moves {
-		sb.WriteString(m.String())
-	}
-	moves := sb.String()
-	ebitenutil.DebugPrintAt(screen, "SOLUTION FOUND", 320, 100)
-	ebitenutil.DebugPrintAt(screen, "Moves : "+moves, 50, 160)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Cost : %d", s.result.TotalCost), 50, 200)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Iterations : %d", s.result.Iterations), 50, 240)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Time : %s", formatMilliseconds(s.result.Duration)), 50, 280)
-	backRect := resultBackLayout()
-	saveRect := resultSaveLayout()
-	playRect := resultPlaybackLayout()
-	drawButton(screen, "< Rechoose", backRect.x, backRect.y, backRect.w, backRect.h, backRect.contains())
-	drawButton(screen, "Save TXT", saveRect.x, saveRect.y, saveRect.w, saveRect.h, saveRect.contains())
-	drawButton(screen, "Playback >>", playRect.x, playRect.y, playRect.w, playRect.h, playRect.contains())
-	if s.saveStatus != "" {
-		ebitenutil.DebugPrintAt(screen, s.saveStatus, centerTextX(s.saveStatus), 520)
-	}
+	ebitenutil.DebugPrintAt(screen, "No solution found.", 310, 280)
+	back := backButtonLayout()
+	drawButton(screen, "< Rechoose", back.x, back.y, back.w, back.h, back.contains())
 }
 
 func saveSolutionFile(path string, b *board.Board, result algorithm.Result) error {
@@ -449,6 +416,7 @@ type PlaybackScreen struct {
 	playing        bool
 	tick           int
 	stepsPerSecond float64
+	saveStatus     string
 }
 
 func newPlaybackScreen(b *board.Board, result algorithm.Result) *PlaybackScreen {
@@ -497,9 +465,9 @@ func (s *PlaybackScreen) Update() (Screen, error) {
 	}
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		prevRect, nextRect, playRect, _, _ := playbackLayout()
+		prevRect, nextRect, playRect, saveRect, _, _ := playbackLayout()
 		if backButtonLayout().contains() {
-			return newResultScreen(s.b, s.result), nil
+			return newAlgoSelectScreen(s.b), nil
 		}
 		if prevRect.contains() && s.step > 0 {
 			s.step--
@@ -509,6 +477,13 @@ func (s *PlaybackScreen) Update() (Screen, error) {
 		}
 		if playRect.contains() {
 			s.togglePlayback()
+		}
+		if saveRect.contains() {
+			if err := saveSolutionFile("solution.txt", s.b, s.result); err != nil {
+				s.saveStatus = "Save failed: " + err.Error()
+			} else {
+				s.saveStatus = "Saved to solution.txt"
+			}
 		}
 	}
 
@@ -531,7 +506,9 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 	gridW := s.b.Cols * tile
 	gridH := s.b.Rows * tile
 	offX := maxInt(pad, centerX(gridW))
-	offY := maxInt(pad, centerY(gridH)-40)
+	boardTop := 95
+	boardBottom := 490
+	offY := boardTop + maxInt(0, (boardBottom-boardTop-gridH)/2)
 
 	tileColors := map[board.Tile]color.RGBA{
 		board.TilePath:     {80, 160, 200, 255},
@@ -561,7 +538,11 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 			drawRect(screen, x+1, y+1, float64(tile-2), float64(tile-2), col)
 
 			if tile >= 18 && board.IsCheckpoint(t) {
-				ebitenutil.DebugPrintAt(screen, string(t), int(x)+tile/3, int(y)+tile/3)
+				label := string(t)
+				if cur.HasVisited(board.CheckpointIndex(t)) {
+					label = label + "*"
+				}
+				ebitenutil.DebugPrintAt(screen, label, int(x)+tile/3, int(y)+tile/3)
 			}
 			if tile >= 18 && t == board.TileGoal {
 				ebitenutil.DebugPrintAt(screen, "O", int(x)+tile/3, int(y)+tile/3)
@@ -583,9 +564,17 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 	if s.step > 0 {
 		stepLabel = fmt.Sprintf("Step %d/%d  Move: %v", s.step, len(s.result.Moves), s.result.Moves[s.step-1])
 	}
-	prevRect, nextRect, playRect, hudY, hintY := playbackLayout()
+	prevRect, nextRect, playRect, saveRect, hudY, hintY := playbackLayout()
+	movesLine := fitText("Moves: "+movesString(s.result.Moves), screenW-pad*2)
+	statsLine := fmt.Sprintf("Cost: %d  Iterations: %d  Time: %s", s.result.TotalCost, s.result.Iterations, formatMilliseconds(s.result.Duration))
+	ebitenutil.DebugPrintAt(screen, "SOLUTION PLAYBACK", centerTextX("SOLUTION PLAYBACK"), 18)
+	ebitenutil.DebugPrintAt(screen, movesLine, pad, 42)
+	ebitenutil.DebugPrintAt(screen, statsLine, pad, 62)
+	if s.saveStatus != "" {
+		ebitenutil.DebugPrintAt(screen, s.saveStatus, pad, 80)
+	}
 	ebitenutil.DebugPrintAt(screen, stepLabel, pad, hudY)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Cost: %d  Speed: %.1f steps/s", s.result.TotalCost, s.stepsPerSecond), 400, hudY)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Speed: %.1f steps/s", s.stepsPerSecond), 560, hudY)
 
 	// Buttons
 	drawButton(screen, "< Prev", prevRect.x, prevRect.y, prevRect.w, prevRect.h, prevRect.contains())
@@ -595,7 +584,8 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 		playLabel = "Pause"
 	}
 	drawButton(screen, playLabel, playRect.x, playRect.y, playRect.w, playRect.h, playRect.contains())
+	drawButton(screen, "Save TXT", saveRect.x, saveRect.y, saveRect.w, saveRect.h, saveRect.contains())
 	back := backButtonLayout()
-	drawButton(screen, "< Back", back.x, back.y, back.w, back.h, back.contains())
-	ebitenutil.DebugPrintAt(screen, "[← →] step  [Space] play  [+/-] speed", 320, hintY)
+	drawButton(screen, "< Rechoose", back.x, back.y, back.w, back.h, back.contains())
+	ebitenutil.DebugPrintAt(screen, "[Left/Right] step  [Space] play  [+/-] speed", pad, hintY)
 }

@@ -406,6 +406,7 @@ func saveSolutionFile(path string, b *board.Board, result algorithm.Result) erro
 	fmt.Fprintln(f, "Initial")
 	writeBoardText(f, b, board.State{Pos: b.Start})
 	for i, move := range result.Moves {
+		fmt.Fprintln(f)
 		fmt.Fprintf(f, "Step %d : %v\n", i+1, move)
 		writeBoardText(f, b, result.Snapshots[i])
 	}

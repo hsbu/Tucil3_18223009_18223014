@@ -145,6 +145,7 @@ func main() {
 			fmt.Fprintln(outFile, "Initial")
 			writeBoard(outFile, b, start)
 			for i, move := range result.Moves {
+				fmt.Fprintln(outFile)
 				fmt.Fprintf(outFile, "Step %d : %v\n", i+1, move)
 				writeBoard(outFile, b, result.Snapshots[i])
 			}

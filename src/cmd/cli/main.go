@@ -3,13 +3,17 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
 	"tucil3/internal/algorithm"
 	"tucil3/internal/board"
 	"tucil3/internal/heuristic"
+
+	"golang.org/x/term"
 )
 
 func main() {
@@ -99,17 +103,8 @@ func main() {
 	fmt.Printf("\nSolusi Yang Ditemukan : %s\n", movesStr.String())
 	fmt.Printf("Cost dari Solusi      : %d\n", result.TotalCost)
 
-	// ── Step visualization ──
-	fmt.Println("Initial")
-	printBoard(b, start)
-
-	for i, move := range result.Moves {
-		fmt.Printf("\nStep %d : %v\n", i+1, move)
-		printBoard(b, result.Snapshots[i])
-	}
-
 	// ── Execution stats ──
-	fmt.Printf("\n>> Waktu eksekusi: %s\n", formatDuration(result.Duration))
+	fmt.Printf("\n>> Waktu eksekusi: %s\n", formatMilliseconds(result.Duration))
 	fmt.Printf(">> Banyak iterasi yang dilakukan: %d iterasi\n", result.Iterations)
 
 	// ── Playback prompt ──
@@ -121,41 +116,7 @@ func main() {
 		allStates := make([]board.State, 0, len(result.Snapshots)+1)
 		allStates = append(allStates, start)
 		allStates = append(allStates, result.Snapshots...)
-
-		running := true
-		for running {
-			fmt.Print(">> Pada step berapa anda ingin melakukan playback :\n")
-			stepStr, _ := reader.ReadString('\n')
-			stepStr = strings.TrimSpace(stepStr)
-			if stepStr == "" {
-				break
-			}
-			step, err := strconv.Atoi(stepStr)
-			if err != nil || step < 0 || step > len(result.Moves) {
-				fmt.Println("Step tidak valid. Masukan angka antara 0 dan", len(result.Moves))
-				continue
-			}
-
-			st := allStates[step]
-			if step == 0 {
-				fmt.Println("Initial")
-			} else {
-				fmt.Printf("Step %d : %v\n", step, result.Moves[step-1])
-			}
-			printBoard(b, st)
-
-			fmt.Print("\n>> Masukan step selanjutnya (atau ketik 'exit' untuk keluar) :\n")
-			nextStr, _ := reader.ReadString('\n')
-			nextStr = strings.TrimSpace(strings.ToLower(nextStr))
-			if nextStr == "exit" || nextStr == "" {
-				running = false
-			} else {
-				if n, err := strconv.Atoi(nextStr); err == nil && n >= 0 && n <= len(result.Moves) {
-					fmt.Printf("Step %d : %v\n", n, result.Moves[n-1])
-					printBoard(b, allStates[n])
-				}
-			}
-		}
+		runPlayback(reader, b, result, allStates)
 	}
 
 	// ── Save solution prompt ──
@@ -178,7 +139,7 @@ func main() {
 			defer outFile.Close()
 			fmt.Fprintf(outFile, "Solusi : %s\n", movesStr.String())
 			fmt.Fprintf(outFile, "Cost   : %d\n", result.TotalCost)
-			fmt.Fprintf(outFile, "Waktu  : %s\n", formatDuration(result.Duration))
+			fmt.Fprintf(outFile, "Waktu  : %s\n", formatMilliseconds(result.Duration))
 			fmt.Fprintf(outFile, "Iterasi: %d\n", result.Iterations)
 			fmt.Fprintln(outFile)
 			fmt.Fprintln(outFile, "Initial")
@@ -192,27 +153,159 @@ func main() {
 	}
 }
 
-func formatDuration(d time.Duration) string {
-	if d <= 0 {
-		return "<1 us"
-	}
+func formatMilliseconds(d time.Duration) string {
 	if d < time.Microsecond {
-		return "<1 us"
+		return "<0.001 ms"
 	}
-	if d < time.Millisecond {
-		return fmt.Sprintf("%.3f us", float64(d.Nanoseconds())/1000)
+	return fmt.Sprintf("%.3f ms", float64(d.Nanoseconds())/1_000_000)
+}
+
+func runPlayback(reader *bufio.Reader, b *board.Board, result algorithm.Result, states []board.State) {
+	step := 0
+	drawPlaybackStep(b, result, states, step)
+
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		runLinePlayback(reader, b, result, states)
+		return
 	}
-	if d < time.Second {
-		return fmt.Sprintf("%.3f ms", float64(d.Nanoseconds())/1_000_000)
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	buf := make([]byte, 8)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if err != nil {
+			return
+		}
+		if n == 1 && (buf[0] == 'q' || buf[0] == 'Q') {
+			fmt.Print("\033[2J\033[H")
+			return
+		}
+		if n == 1 && (buf[0] == 'd' || buf[0] == 'D' || buf[0] == 'n' || buf[0] == 'N') {
+			if step < len(states)-1 {
+				step++
+				drawPlaybackStep(b, result, states, step)
+			}
+			continue
+		}
+		if n == 1 && (buf[0] == 'a' || buf[0] == 'A' || buf[0] == 'p' || buf[0] == 'P') {
+			if step > 0 {
+				step--
+				drawPlaybackStep(b, result, states, step)
+			}
+			continue
+		}
+		if n == 1 && (buf[0] == 'j' || buf[0] == 'J') {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+			step = promptPlaybackStep(reader, len(states)-1, step)
+			oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
+			if err != nil {
+				drawPlaybackStep(b, result, states, step)
+				runLinePlayback(reader, b, result, states)
+				return
+			}
+			drawPlaybackStep(b, result, states, step)
+			continue
+		}
+		if n >= 3 && buf[0] == 27 && buf[1] == '[' {
+			switch buf[2] {
+			case 'C':
+				if step < len(states)-1 {
+					step++
+					drawPlaybackStep(b, result, states, step)
+				}
+			case 'D':
+				if step > 0 {
+					step--
+					drawPlaybackStep(b, result, states, step)
+				}
+			}
+			continue
+		}
+		if n >= 2 && (buf[0] == 0 || buf[0] == 224) {
+			switch buf[1] {
+			case 77:
+				if step < len(states)-1 {
+					step++
+					drawPlaybackStep(b, result, states, step)
+				}
+			case 75:
+				if step > 0 {
+					step--
+					drawPlaybackStep(b, result, states, step)
+				}
+			}
+			continue
+		}
+		if n >= 1 && buf[0] == 27 {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+			step = promptPlaybackStep(reader, len(states)-1, step)
+			oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
+			if err != nil {
+				drawPlaybackStep(b, result, states, step)
+				runLinePlayback(reader, b, result, states)
+				return
+			}
+			drawPlaybackStep(b, result, states, step)
+		}
 	}
-	return fmt.Sprintf("%.3f s", d.Seconds())
+}
+
+func runLinePlayback(reader *bufio.Reader, b *board.Board, result algorithm.Result, states []board.State) {
+	step := 0
+	for {
+		drawPlaybackStep(b, result, states, step)
+		fmt.Print(">> Masukan step, n untuk next, p untuk prev, atau q untuk keluar: ")
+		text, _ := reader.ReadString('\n')
+		text = strings.TrimSpace(strings.ToLower(text))
+		switch text {
+		case "q", "quit", "exit":
+			return
+		case "n", "":
+			if step < len(states)-1 {
+				step++
+			}
+		case "p":
+			if step > 0 {
+				step--
+			}
+		default:
+			step = parsePlaybackStep(text, len(states)-1, step)
+		}
+	}
+}
+
+func promptPlaybackStep(reader *bufio.Reader, maxStep, current int) int {
+	fmt.Printf("\n>> Lompat ke step berapa? (0-%d): ", maxStep)
+	text, _ := reader.ReadString('\n')
+	return parsePlaybackStep(strings.TrimSpace(text), maxStep, current)
+}
+
+func parsePlaybackStep(text string, maxStep, current int) int {
+	step, err := strconv.Atoi(text)
+	if err != nil || step < 0 || step > maxStep {
+		return current
+	}
+	return step
+}
+
+func drawPlaybackStep(b *board.Board, result algorithm.Result, states []board.State, step int) {
+	fmt.Print("\033[H\033[2J")
+	if step == 0 {
+		fmt.Printf("Initial | Step 0/%d\n", len(states)-1)
+	} else {
+		fmt.Printf("Step %d/%d | Move: %v\n", step, len(states)-1, result.Moves[step-1])
+	}
+	fmt.Println("Arrow kiri/kanan atau A/D: mundur/maju | ESC/J: lompat step | q: keluar")
+	printBoard(b, states[step])
+	fmt.Print("\033[J")
 }
 
 func printBoard(b *board.Board, s board.State) {
 	writeBoard(os.Stdout, b, s)
 }
 
-func writeBoard(w *os.File, b *board.Board, s board.State) {
+func writeBoard(w io.Writer, b *board.Board, s board.State) {
 	for r := 0; r < b.Rows; r++ {
 		for c := 0; c < b.Cols; c++ {
 			if s.Pos == (board.Position{Row: r, Col: c}) {

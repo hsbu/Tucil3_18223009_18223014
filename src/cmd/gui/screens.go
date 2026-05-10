@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,20 +77,11 @@ func centerTextX(text string) int {
 	return centerX(textWidth(text))
 }
 
-func formatDuration(d time.Duration) string {
-	if d <= 0 {
-		return "<1 us"
-	}
+func formatMilliseconds(d time.Duration) string {
 	if d < time.Microsecond {
-		return "<1 us"
+		return "<0.001 ms"
 	}
-	if d < time.Millisecond {
-		return fmt.Sprintf("%.3f us", float64(d.Nanoseconds())/1000)
-	}
-	if d < time.Second {
-		return fmt.Sprintf("%.3f ms", float64(d.Nanoseconds())/1_000_000)
-	}
-	return fmt.Sprintf("%.3f s", d.Seconds())
+	return fmt.Sprintf("%.3f ms", float64(d.Nanoseconds())/1_000_000)
 }
 
 func fileSelectLayout() (uiRect, uiRect) {
@@ -129,11 +121,15 @@ func backButtonLayout() uiRect {
 }
 
 func resultPlaybackLayout() uiRect {
-	return uiRect{x: centerX(btnW) + 60, y: 460, w: btnW, h: btnH}
+	return uiRect{x: centerX(btnW) + 180, y: 460, w: btnW, h: btnH}
 }
 
 func resultBackLayout() uiRect {
-	return uiRect{x: centerX(btnW) - 160, y: 460, w: btnW, h: btnH}
+	return uiRect{x: centerX(btnW) - 180, y: 460, w: btnW, h: btnH}
+}
+
+func resultSaveLayout() uiRect {
+	return uiRect{x: centerX(btnW), y: 460, w: btnW, h: btnH}
 }
 
 func playbackLayout() (uiRect, uiRect, uiRect, int, int) {
@@ -339,8 +335,9 @@ func (s *SolvingScreen) Draw(screen *ebiten.Image) {
 }
 
 type ResultScreen struct {
-	b      *board.Board
-	result algorithm.Result
+	b          *board.Board
+	result     algorithm.Result
+	saveStatus string
 }
 
 func newResultScreen(b *board.Board, result algorithm.Result) *ResultScreen {
@@ -351,6 +348,14 @@ func (s *ResultScreen) Update() (Screen, error) {
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		if resultBackLayout().contains() {
 			return newAlgoSelectScreen(s.b), nil
+		}
+		if s.result.Found && resultSaveLayout().contains() {
+			if err := saveSolutionFile("solution.txt", s.b, s.result); err != nil {
+				s.saveStatus = "Save failed: " + err.Error()
+			} else {
+				s.saveStatus = "Saved to solution.txt"
+			}
+			return s, nil
 		}
 		if s.result.Found && resultPlaybackLayout().contains() {
 			return newPlaybackScreen(s.b, s.result), nil
@@ -374,23 +379,75 @@ func (s *ResultScreen) Draw(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, "Moves : "+moves, 50, 160)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Cost : %d", s.result.TotalCost), 50, 200)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Iterations : %d", s.result.Iterations), 50, 240)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Time : %s", formatDuration(s.result.Duration)), 50, 280)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Time : %s", formatMilliseconds(s.result.Duration)), 50, 280)
 	backRect := resultBackLayout()
+	saveRect := resultSaveLayout()
 	playRect := resultPlaybackLayout()
 	drawButton(screen, "< Rechoose", backRect.x, backRect.y, backRect.w, backRect.h, backRect.contains())
+	drawButton(screen, "Save TXT", saveRect.x, saveRect.y, saveRect.w, saveRect.h, saveRect.contains())
 	drawButton(screen, "Playback >>", playRect.x, playRect.y, playRect.w, playRect.h, playRect.contains())
+	if s.saveStatus != "" {
+		ebitenutil.DebugPrintAt(screen, s.saveStatus, centerTextX(s.saveStatus), 520)
+	}
+}
+
+func saveSolutionFile(path string, b *board.Board, result algorithm.Result) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	fmt.Fprintf(f, "Solusi : %s\n", movesString(result.Moves))
+	fmt.Fprintf(f, "Cost   : %d\n", result.TotalCost)
+	fmt.Fprintf(f, "Waktu  : %s\n", formatMilliseconds(result.Duration))
+	fmt.Fprintf(f, "Iterasi: %d\n", result.Iterations)
+	fmt.Fprintln(f)
+	fmt.Fprintln(f, "Initial")
+	writeBoardText(f, b, board.State{Pos: b.Start})
+	for i, move := range result.Moves {
+		fmt.Fprintf(f, "Step %d : %v\n", i+1, move)
+		writeBoardText(f, b, result.Snapshots[i])
+	}
+	return nil
+}
+
+func movesString(moves []board.Direction) string {
+	var sb strings.Builder
+	for _, m := range moves {
+		sb.WriteString(m.String())
+	}
+	return sb.String()
+}
+
+func writeBoardText(w io.Writer, b *board.Board, s board.State) {
+	for r := 0; r < b.Rows; r++ {
+		for c := 0; c < b.Cols; c++ {
+			if s.Pos == (board.Position{Row: r, Col: c}) {
+				fmt.Fprint(w, "Z")
+				continue
+			}
+			t := b.Grid[r][c]
+			if board.IsCheckpoint(t) && s.HasVisited(board.CheckpointIndex(t)) {
+				fmt.Fprint(w, "*")
+			} else {
+				fmt.Fprintf(w, "%c", t)
+			}
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 const tileSize = 36
 
 type PlaybackScreen struct {
-	b             *board.Board
-	result        algorithm.Result
-	allStates     []board.State
-	step          int
-	playing       bool
-	tick          int
-	framesPerStep int
+	b              *board.Board
+	result         algorithm.Result
+	allStates      []board.State
+	step           int
+	playing        bool
+	tick           int
+	stepsPerSecond float64
 }
 
 func newPlaybackScreen(b *board.Board, result algorithm.Result) *PlaybackScreen {
@@ -400,7 +457,7 @@ func newPlaybackScreen(b *board.Board, result algorithm.Result) *PlaybackScreen 
 	all = append(all, result.Snapshots...)
 	return &PlaybackScreen{
 		b: b, result: result,
-		allStates: all, framesPerStep: 20,
+		allStates: all, stepsPerSecond: 3,
 	}
 }
 
@@ -413,18 +470,22 @@ func (s *PlaybackScreen) Update() (Screen, error) {
 		s.step--
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		s.playing = !s.playing
+		s.togglePlayback()
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEqual) && s.framesPerStep > 5 {
-		s.framesPerStep -= 5
+	if inpututil.IsKeyJustPressed(ebiten.KeyEqual) && s.stepsPerSecond < 12 {
+		s.stepsPerSecond += 0.5
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyMinus) && s.framesPerStep < 120 {
-		s.framesPerStep += 5
+	if inpututil.IsKeyJustPressed(ebiten.KeyMinus) && s.stepsPerSecond > 0.5 {
+		s.stepsPerSecond -= 0.5
 	}
 
 	if s.playing {
 		s.tick++
-		if s.tick >= s.framesPerStep {
+		framesPerStep := int(60.0 / s.stepsPerSecond)
+		if framesPerStep < 1 {
+			framesPerStep = 1
+		}
+		if s.tick >= framesPerStep {
 			s.tick = 0
 			if s.step < len(s.result.Moves) {
 				s.step++
@@ -446,11 +507,19 @@ func (s *PlaybackScreen) Update() (Screen, error) {
 			s.step++
 		}
 		if playRect.contains() {
-			s.playing = !s.playing
+			s.togglePlayback()
 		}
 	}
 
 	return s, nil
+}
+
+func (s *PlaybackScreen) togglePlayback() {
+	if !s.playing && s.step >= len(s.result.Moves) {
+		s.step = 0
+		s.tick = 0
+	}
+	s.playing = !s.playing
 }
 
 func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
@@ -515,7 +584,7 @@ func (s *PlaybackScreen) Draw(screen *ebiten.Image) {
 	}
 	prevRect, nextRect, playRect, hudY, hintY := playbackLayout()
 	ebitenutil.DebugPrintAt(screen, stepLabel, pad, hudY)
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Cost: %d  Speed: %dfps/step", s.result.TotalCost, s.framesPerStep), 400, hudY)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Cost: %d  Speed: %.1f steps/s", s.result.TotalCost, s.stepsPerSecond), 400, hudY)
 
 	// Buttons
 	drawButton(screen, "< Prev", prevRect.x, prevRect.y, prevRect.w, prevRect.h, prevRect.contains())

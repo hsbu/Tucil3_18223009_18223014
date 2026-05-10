@@ -181,14 +181,14 @@ func runPlayback(reader *bufio.Reader, b *board.Board, result algorithm.Result, 
 			fmt.Print("\033[2J\033[H")
 			return
 		}
-		if n == 1 && (buf[0] == 'd' || buf[0] == 'D' || buf[0] == 'n' || buf[0] == 'N') {
+		if n == 1 && (buf[0] == 'd' || buf[0] == 'D') {
 			if step < len(states)-1 {
 				step++
 				drawPlaybackStep(b, result, states, step)
 			}
 			continue
 		}
-		if n == 1 && (buf[0] == 'a' || buf[0] == 'A' || buf[0] == 'p' || buf[0] == 'P') {
+		if n == 1 && (buf[0] == 'a' || buf[0] == 'A') {
 			if step > 0 {
 				step--
 				drawPlaybackStep(b, result, states, step)
@@ -205,36 +205,6 @@ func runPlayback(reader *bufio.Reader, b *board.Board, result algorithm.Result, 
 				return
 			}
 			drawPlaybackStep(b, result, states, step)
-			continue
-		}
-		if n >= 3 && buf[0] == 27 && buf[1] == '[' {
-			switch buf[2] {
-			case 'C':
-				if step < len(states)-1 {
-					step++
-					drawPlaybackStep(b, result, states, step)
-				}
-			case 'D':
-				if step > 0 {
-					step--
-					drawPlaybackStep(b, result, states, step)
-				}
-			}
-			continue
-		}
-		if n >= 2 && (buf[0] == 0 || buf[0] == 224) {
-			switch buf[1] {
-			case 77:
-				if step < len(states)-1 {
-					step++
-					drawPlaybackStep(b, result, states, step)
-				}
-			case 75:
-				if step > 0 {
-					step--
-					drawPlaybackStep(b, result, states, step)
-				}
-			}
 			continue
 		}
 		if n >= 1 && buf[0] == 27 {
@@ -255,17 +225,17 @@ func runLinePlayback(reader *bufio.Reader, b *board.Board, result algorithm.Resu
 	step := 0
 	for {
 		drawPlaybackStep(b, result, states, step)
-		fmt.Print(">> Masukan step, n untuk next, p untuk prev, atau q untuk keluar: ")
+		fmt.Print(">> Masukan step, d untuk next, a untuk prev, atau q untuk keluar: ")
 		text, _ := reader.ReadString('\n')
 		text = strings.TrimSpace(strings.ToLower(text))
 		switch text {
 		case "q", "quit", "exit":
 			return
-		case "n", "":
+		case "d", "":
 			if step < len(states)-1 {
 				step++
 			}
-		case "p":
+		case "a":
 			if step > 0 {
 				step--
 			}
@@ -296,7 +266,7 @@ func drawPlaybackStep(b *board.Board, result algorithm.Result, states []board.St
 	} else {
 		fmt.Printf("Step %d/%d | Move: %v\n", step, len(states)-1, result.Moves[step-1])
 	}
-	fmt.Println("Arrow kiri/kanan atau A/D: mundur/maju | ESC/J: lompat step | q: keluar")
+	fmt.Println("A/D: mundur/maju | ESC/J: lompat step | q: keluar")
 	printBoard(b, states[step])
 	fmt.Print("\033[J")
 }

@@ -5,16 +5,20 @@ import "container/heap"
 type pqItem struct {
 	node  *Node
 	index int
+	order int
 }
 
 type innerHeap []*pqItem
 
-func (h innerHeap) Len() int { 
-	return len(h) 
+func (h innerHeap) Len() int {
+	return len(h)
 }
 
-func (h innerHeap) Less(i, j int) bool { 
-	return h[i].node.F < h[j].node.F 
+func (h innerHeap) Less(i, j int) bool {
+	if h[i].node.F == h[j].node.F {
+		return h[i].order < h[j].order
+	}
+	return h[i].node.F < h[j].node.F
 }
 
 func (h innerHeap) Swap(i, j int) {
@@ -39,8 +43,9 @@ func (h *innerHeap) Pop() interface{} {
 	return item
 }
 
-type PriorityQueue struct{ 
-	h innerHeap 
+type PriorityQueue struct {
+	h     innerHeap
+	order int
 }
 
 func NewPriorityQueue() *PriorityQueue {
@@ -49,14 +54,15 @@ func NewPriorityQueue() *PriorityQueue {
 	return pq
 }
 
-func (p *PriorityQueue) Push(n *Node) { 
-	heap.Push(&p.h, &pqItem{node: n}) 
+func (p *PriorityQueue) Push(n *Node) {
+	heap.Push(&p.h, &pqItem{node: n, order: p.order})
+	p.order++
 }
 
-func (p *PriorityQueue) Pop() *Node { 
-	return heap.Pop(&p.h).(*pqItem).node 
+func (p *PriorityQueue) Pop() *Node {
+	return heap.Pop(&p.h).(*pqItem).node
 }
 
-func (p *PriorityQueue) Len() int { 
-	return p.h.Len() 
+func (p *PriorityQueue) Len() int {
+	return p.h.Len()
 }

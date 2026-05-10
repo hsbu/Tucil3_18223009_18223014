@@ -85,6 +85,19 @@ func algoButtonsLayout() (uiRect, uiRect, uiRect) {
 	return ucs, gbfs, astar
 }
 
+func heuristicButtonsLayout() []uiRect {
+	gap := 16
+	w := 110
+	totalW := w*len(heuristic.All) + gap*(len(heuristic.All)-1)
+	startX := centerX(totalW)
+	y := 270
+	rects := make([]uiRect, len(heuristic.All))
+	for i := range rects {
+		rects[i] = uiRect{x: startX + i*(w+gap), y: y, w: w, h: 50}
+	}
+	return rects
+}
+
 func resultPlaybackLayout() uiRect {
 	return uiRect{x: centerX(btnW), y: 460, w: btnW, h: btnH}
 }
@@ -172,12 +185,15 @@ func (s *AlgoSelectScreen) Update() (Screen, error) {
 	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return s, nil
 	}
-	ucs, _, _ := algoButtonsLayout()
+	ucs, gbfs, astar := algoButtonsLayout()
 	if ucs.contains() {
 		return newSolvingScreen(s.b, algorithm.UCS{}, nil), nil
 	}
-	if inRect(280, 270, 200, 50) {
-		return newSolvingScreen(s.b, algorithm.GBFS{}, heuristic.H1), nil
+	if gbfs.contains() {
+		return newHeuristicSelectScreen(s.b, algorithm.GBFS{}, "GBFS"), nil
+	}
+	if astar.contains() {
+		return newHeuristicSelectScreen(s.b, algorithm.AStar{}, "A*"), nil
 	}
 	return s, nil
 }
@@ -189,7 +205,45 @@ func (s *AlgoSelectScreen) Draw(screen *ebiten.Image) {
 	drawButton(screen, "UCS", ucs.x, ucs.y, ucs.w, ucs.h, ucs.contains())
 	drawButton(screen, "GBFS", gbfs.x, gbfs.y, gbfs.w, gbfs.h, gbfs.contains())
 	drawButton(screen, "A*", astar.x, astar.y, astar.w, astar.h, astar.contains())
-	ebitenutil.DebugPrintAt(screen, "GBFS and A* use H1 heuristic", 286, 340)
+	ebitenutil.DebugPrintAt(screen, "GBFS and A* require a heuristic", 286, 340)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Board: %dx%d  Checkpoints: %d", s.b.Rows, s.b.Cols, len(s.b.Checkpoints)), 286, 420)
+}
+
+type HeuristicSelectScreen struct {
+	b        *board.Board
+	algo     algorithm.Algorithm
+	algoName string
+}
+
+func newHeuristicSelectScreen(b *board.Board, algo algorithm.Algorithm, algoName string) *HeuristicSelectScreen {
+	return &HeuristicSelectScreen{b: b, algo: algo, algoName: algoName}
+}
+
+func (s *HeuristicSelectScreen) Update() (Screen, error) {
+	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return s, nil
+	}
+	for i, rect := range heuristicButtonsLayout() {
+		if rect.contains() {
+			return newSolvingScreen(s.b, s.algo, heuristic.All[i].Fn), nil
+		}
+	}
+	return s, nil
+}
+
+func (s *HeuristicSelectScreen) Draw(screen *ebiten.Image) {
+	screen.Fill(color.RGBA{15, 15, 30, 255})
+	title := fmt.Sprintf("Choose Heuristic for %s", s.algoName)
+	ebitenutil.DebugPrintAt(screen, title, centerTextX(title), 180)
+	for i, rect := range heuristicButtonsLayout() {
+		h := heuristic.All[i]
+		label := h.Name
+		if h.Admissible {
+			label += " *"
+		}
+		drawButton(screen, label, rect.x, rect.y, rect.w, rect.h, rect.contains())
+	}
+	ebitenutil.DebugPrintAt(screen, "* admissible", centerTextX("* admissible"), 340)
 	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Board: %dx%d  Checkpoints: %d", s.b.Rows, s.b.Cols, len(s.b.Checkpoints)), 286, 420)
 }
 
